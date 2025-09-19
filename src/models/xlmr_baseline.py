@@ -4,7 +4,7 @@ from pathlib import Path
 from datasets import Dataset
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, DataCollatorWithPadding, Trainer, TrainingArguments
 from sklearn.model_selection import train_test_split
-from ..data import build_text, label2id, id2label
+from ..data import build_text, build_text_truncate, label2id, id2label
 
 def compute_metrics(eval_pred):
     from sklearn.metrics import f1_score, accuracy_score
@@ -18,7 +18,8 @@ def train_xlmr(train_path: str, cfg_path: str, out_dir: str):
     cfg = json.load(open(cfg_path, "r", encoding="utf-8"))
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
     df = pd.read_csv(train_path)
-    df["text"] = build_text(df)
+    #df["text"] = build_text(df) -> orgin
+    df["text"] = build_text_truncate(df, cfg["model_name"], cfg["max_length"])
     df["labels"] = df["label"].map(label2id).astype(int)
     tr_df, val_df = train_test_split(df[["text","labels"]], test_size=0.15, random_state=cfg["seed"], stratify=df["labels"])
     tok = AutoTokenizer.from_pretrained(cfg["model_name"])
@@ -42,6 +43,9 @@ def train_xlmr(train_path: str, cfg_path: str, out_dir: str):
         eval_strategy=cfg["eval_strategy"],
         save_strategy=cfg["save_strategy"],
         logging_steps=50,
+        # Warmup & cosine
+        warmup_ratio=0.06,
+        lr_scheduler_type="cosine",
         save_total_limit=1,
         load_best_model_at_end=True,
         metric_for_best_model="f1_macro",
@@ -64,7 +68,8 @@ def train_xlmr(train_path: str, cfg_path: str, out_dir: str):
 
 def predict_xlmr(model_dir: str, test_path: str, out_csv: str, max_length: int):
     df = pd.read_csv(test_path)
-    df["text"] = build_text(df)
+    #df["text"] = build_text(df) -> origin
+    df["text"] = build_text_truncate(df, model_dir, max_length)
     tok = AutoTokenizer.from_pretrained(model_dir)
     model = AutoModelForSequenceClassification.from_pretrained(model_dir)
     device = "cuda" if torch.cuda.is_available() else "cpu"
